@@ -37,6 +37,7 @@ from static_frame.core.frame import FrameAssignILoc
 from static_frame.core.frame import FrameAssignBLoc
 from static_frame.core.store import StoreConfig
 from static_frame.core.store_filter import StoreFilter
+from static_frame.test.test_case import skip_guess
 from static_frame.core.store_xlsx import StoreXLSX
 from static_frame.core.util import STORE_LABEL_DEFAULT
 from static_frame.test.test_case import skip_pylt37
@@ -5246,6 +5247,7 @@ class TestUnit(TestCase):
 
 
     #---------------------------------------------------------------------------
+    @skip_guess
     @skip_win  # type: ignore
     def test_frame_from_csv_a(self) -> None:
         # header, mixed types, no index
@@ -5281,6 +5283,41 @@ class TestUnit(TestCase):
         self.assertEqual(f3.dtypes.iter_element().apply(str).to_pairs(),
                 (('color', '<U5'), ('count', 'int64'), ('score', 'float64')))
 
+    @skip_win  # type: ignore
+    def test_frame_from_csv_a_no_guess(self) -> None:
+        # header, mixed types, no index
+
+        s1 = StringIO('count,score,color\n1,1.3,red\n3,5.2,green\n100,3.4,blue\n4,9.0,black')
+        dtypes = {'count': int, 'score': float,}
+        f1 = Frame.from_csv(s1, dtypes=dtypes, guess_dtypes=False)
+
+        post = f1.iloc[:, :2].sum(axis=0)
+        self.assertEqual(post.to_pairs(),
+                (('count', 108.0), ('score', 18.9)))
+        self.assertEqual(f1.shape, (4, 3))
+
+        self.assertEqual(f1.dtypes.iter_element().apply(str).to_pairs(),
+                (('count', 'int64'), ('score', 'float64'), ('color', 'object')))
+
+
+        s2 = StringIO('color,count,score\nred,1,1.3\ngreen,3,5.2\nblue,100,3.4\nblack,4,9.0')
+
+        f2 = Frame.from_csv(s2, dtypes=dtypes, guess_dtypes=False)
+        self.assertEqual(f2['count':].sum().to_pairs(),  # type: ignore  # https://github.com/python/typeshed/pull/3024
+                (('count', 108.0), ('score', 18.9)))
+        self.assertEqual(f2.shape, (4, 3))
+        self.assertEqual(f2.dtypes.iter_element().apply(str).to_pairs(),
+                (('color', 'object'), ('count', 'int64'), ('score', 'float64')))
+
+
+        # add junk at beginning and end
+        s3 = StringIO('junk\ncolor,count,score\nred,1,1.3\ngreen,3,5.2\nblue,100,3.4\nblack,4,9.0\njunk')
+
+        f3 = Frame.from_csv(s3, skip_header=1, skip_footer=1, dtypes=dtypes, guess_dtypes=False)
+        self.assertEqual(f3.shape, (4, 3))
+        self.assertEqual(f3.dtypes.iter_element().apply(str).to_pairs(),
+                (('color', 'object'), ('count', 'int64'), ('score', 'float64')))
+
 
 
     def test_frame_from_csv_b(self) -> None:
@@ -5292,12 +5329,19 @@ class TestUnit(TestCase):
         self.assertEqual(f1.columns.values.tolist(),
                 ['count', 'number', 'weight', 'scalar', 'color', 'active'])
 
-
+    @skip_guess
     def test_frame_from_csv_c(self) -> None:
         s1 = StringIO('color,count,score\nred,1,1.3\ngreen,3,5.2\nblue,100,3.4\nblack,4,9.0')
         f1 = Frame.from_csv(s1, index_depth=1)
         self.assertEqual(f1.to_pairs(0),
                 (('count', (('red', 1), ('green', 3), ('blue', 100), ('black', 4))), ('score', (('red', 1.3), ('green', 5.2), ('blue', 3.4), ('black', 9.0)))))
+
+
+    def test_frame_from_csv_c_no_guess(self) -> None:
+        s1 = StringIO('color,count,score\nred,1,1.3\ngreen,3,5.2\nblue,100,3.4\nblack,4,9.0')
+        f1 = Frame.from_csv(s1, index_depth=1, guess_dtypes=False)
+        self.assertEqual(f1.to_pairs(0),
+                (('count', (('red', '1'), ('green', '3'), ('blue', '100'), ('black', '4'))), ('score', (('red', '1.3'), ('green', '5.2'), ('blue', '3.4'), ('black', '9.0')))))
 
 
     def test_frame_from_csv_d(self) -> None:
@@ -5307,6 +5351,7 @@ class TestUnit(TestCase):
             (('color', ()), ('count', ()), ('score', ()))
             )
 
+    @skip_guess
     def test_frame_from_csv_e(self) -> None:
         s1 = StringIO('group,count,score,color\nA,1,1.3,red\nA,3,5.2,green\nB,100,3.4,blue\nB,4,9.0,black')
 
@@ -5318,7 +5363,29 @@ class TestUnit(TestCase):
         self.assertEqual(f1.to_pairs(0),
                 (('score', ((('A', 1), 1.3), (('A', 3), 5.2), (('B', 100), 3.4), (('B', 4), 9.0))), ('color', ((('A', 1), 'red'), (('A', 3), 'green'), (('B', 100), 'blue'), (('B', 4), 'black')))))
 
+    def test_frame_from_csv_e_no_guess(self) -> None:
+        s1 = StringIO('group,count,score,color\nA,1,1.3,red\nA,3,5.2,green\nB,100,3.4,blue\nB,4,9.0,black')
 
+        f1 = sf.Frame.from_csv(
+                s1,
+                index_depth=2,
+                columns_depth=1,
+                guess_dtypes=False,
+        )
+        self.assertEqual(f1.index.__class__, IndexHierarchy)
+        self.assertEqual(f1.to_pairs(0),
+                (('score',
+                  ((('A', '1'), '1.3'),
+                   (('A', '3'), '5.2'),
+                   (('B', '100'), '3.4'),
+                   (('B', '4'), '9.0'))),
+                 ('color',
+                  ((('A', '1'), 'red'),
+                   (('A', '3'), 'green'),
+                   (('B', '100'), 'blue'),
+                   (('B', '4'), 'black')))))
+
+    @skip_guess
     def test_frame_from_csv_f(self) -> None:
         s1 = StringIO('group,count,score,color\nA,nan,1.3,red\nB,NaN,5.2,green\nC,NULL,3.4,blue\nD,,9.0,black')
 
@@ -5331,11 +5398,49 @@ class TestUnit(TestCase):
                 (('count', (('A', np.nan), ('B', np.nan), ('C', np.nan), ('D', np.nan))), ('score', (('A', 1.3), ('B', 5.2), ('C', 3.4), ('D', 9.0))), ('color', (('A', 'red'), ('B', 'green'), ('C', 'blue'), ('D', 'black'))))
                 )
 
+    def test_frame_from_csv_f_no_guess(self) -> None:
+        s1 = StringIO('group,count,score,color\nA,nan,1.3,red\nB,NaN,5.2,green\nC,nan,3.4,blue\nD,nan,9.0,black')
 
+        f1 = sf.Frame.from_csv(
+                s1,
+                index_depth=1,
+                columns_depth=1,
+                guess_dtypes=False,
+                dtypes={
+                    'count': float,
+                    'score': float,
+                }
+        )
+
+        self.assertAlmostEqualFramePairs(f1.to_pairs(0),
+                (('count', (('A', np.nan), ('B', np.nan), ('C', np.nan), ('D', np.nan))), ('score', (('A', 1.3), ('B', 5.2), ('C', 3.4), ('D', 9.0))), ('color', (('A', 'red'), ('B', 'green'), ('C', 'blue'), ('D', 'black'))))
+                )
+
+    @skip_guess
     def test_frame_from_csv_g(self) -> None:
         filelike = StringIO('''0,4,234.5,5.3,'red',False
 30,50,9.234,5.434,'blue',True''')
         f1 = Frame.from_csv(filelike, columns_depth=0)
+        self.assertEqual(f1.to_pairs(0),
+            ((0, ((0, 0), (1, 30))), (1, ((0, 4), (1, 50))), (2, ((0, 234.5), (1, 9.234))), (3, ((0, 5.3), (1, 5.434))), (4, ((0, "'red'"), (1, "'blue'"))), (5, ((0, False), (1, True))))
+            )
+
+
+    def test_frame_from_csv_g_no_guess(self) -> None:
+        filelike = StringIO('''0,4,234.5,5.3,'red',False
+30,50,9.234,5.434,'blue',True''')
+        f1 = Frame.from_csv(
+            filelike,
+            columns_depth=0,
+            guess_dtypes=False,
+            dtypes={
+                0: 'int64',
+                1: 'int64',
+                2: 'float64',
+                3: 'float64',
+                5: 'bool',
+            }
+        )
         self.assertEqual(f1.to_pairs(0),
             ((0, ((0, 0), (1, 30))), (1, ((0, 4), (1, 50))), (2, ((0, 234.5), (1, 9.234))), (3, ((0, 5.3), (1, 5.434))), (4, ((0, "'red'"), (1, "'blue'"))), (5, ((0, False), (1, True))))
             )
@@ -6077,6 +6182,7 @@ class TestUnit(TestCase):
             self.assertEqualFrames(f1, f2)
 
     #---------------------------------------------------------------------------
+
     def test_frame_to_html_a(self) -> None:
         records = (
                 (2, 'a', False),

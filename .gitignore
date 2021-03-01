@@ -13,5 +13,11 @@ dist
 *.egg-info
 *.so
 
-# Wing
+# WingIDE
 *.wp[ur]
+
+# Macos
+.DS_Store
+
+# Line profiler
+*.lprof

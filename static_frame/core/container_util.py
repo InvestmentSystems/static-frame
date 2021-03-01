@@ -1093,22 +1093,45 @@ class MessagePackElement:
         return d
 
 
+def array_to_index(
+        array: np.ndarray,
+        index_constructor: tp.Callable,
+        hierarchy_constructor: tp.Callable,
+        **constructor_kwargs: tp.Any,
+    ) -> IndexBase:
+    '''Given an array, call either `index_constructor` or `hierarchy_constructor` depending on the dimensionality of the data.
+    `array` is assumed to be 2 dimensional.
+    '''
+    if any(d == 1 for d in array.shape):
+        index = index_constructor(array.flatten())
+    else:
+        index = hierarchy_constructor(array, **constructor_kwargs)
+    return index
 
 
+def apply_converters_and_dtypes(
+        frame: 'Frame',
+        converters: tp.Dict[GetItemKeyType, tp.Callable[[tp.Any], tp.Any]],
+        dtypes: DtypesSpecifier = None,
+    ) -> 'Frame':
+    '''Given a dictionary mapping column name to function that takes an element and returns an element, apply functions to each element in the corresponding column, and returnt the result.
+    '''
+    working_dtypes = dtypes.copy()
 
+    from collections import OrderedDict
+    converted = OrderedDict()
+    for name, converter in converters.items():
+        new = frame[name].iter_element().apply(
+                converter,
+                dtype=working_dtypes.pop(name, None),
+                name=name,
+        )
+        converted[name] = new
 
+    # Insert the new values into the frame. Is there a way to do this without the intermediate frame?
+    from static_frame.core.frame import Frame
+    converted_frame = frame.assign[list(converted.keys())](Frame.from_concat(converted.values(), axis=1))
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    # For now, apply all dtypes to the resulting frame, because of
+    # https://github.com/InvestmentSystems/static-frame/issues/303
+    return converted_frame.astype(dtypes)

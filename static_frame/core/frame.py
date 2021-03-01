@@ -34,6 +34,8 @@ from static_frame.core.container_util import rehierarch_from_index_hierarchy
 from static_frame.core.container_util import rehierarch_from_type_blocks
 from static_frame.core.container_util import apex_to_name
 from static_frame.core.container_util import MessagePackElement
+from static_frame.core.container_util import array_to_index
+from static_frame.core.container_util import apply_converters_and_dtypes
 from static_frame.core.container_util import sort_index_for_order
 
 from static_frame.core.display import Display
@@ -146,6 +148,8 @@ from static_frame.core.util import DTYPE_INT_DEFAULT
 from static_frame.core.util import STORE_LABEL_DEFAULT
 from static_frame.core.util import file_like_manager
 
+from static_frame.core import io_util
+
 
 if tp.TYPE_CHECKING:
     import pandas #pylint: disable=W0611 #pragma: no cover
@@ -153,7 +157,16 @@ if tp.TYPE_CHECKING:
     import pyarrow #pylint: disable=W0611 #pragma: no cover
 
 
+# TODO REMOVE
+#  Add a blank placeholder so I don't have to keep commenting/uncommenting the profile decorator
+try:
+    profile
+except NameError:
+    def profile(func):
+        return func
 
+
+@doc_inject(selector='container_init', class_name='Frame')
 class Frame(ContainerOperand):
     '''A two-dimensional ordered, labelled collection, immutable and of fixed size.
     '''
@@ -1600,7 +1613,83 @@ class Frame(ContainerOperand):
                 )
 
     @classmethod
+    @profile
+    def from_delimited_no_guess(cls,
+            fp: PathSpecifierOrFileLikeOrIterator,
+            *,
+            delimiter: str,
+            index_depth: int = 0,
+            index_column_first: tp.Optional[tp.Union[int, str]] = None,
+            index_name_depth_level: tp.Optional[DepthLevelSpecifier] = None,
+            columns_depth: int = 1,
+            columns_name_depth_level: tp.Optional[DepthLevelSpecifier] = None,
+            skip_header: int = 0,
+            skip_footer: int = 0,
+            quote_char: str = '"',
+            encoding: tp.Optional[str] = None,
+            converters: tp.Optional[tp.Dict[GetItemKeyType, tp.Callable[[tp.Any], tp.Any]]]=None,
+            dtypes: DtypesSpecifier = None,
+            name: tp.Hashable = None,
+            consolidate_blocks: bool = False,
+            store_filter: tp.Optional[StoreFilter] = STORE_FILTER_DEFAULT
+            ) -> 'Frame':
+        array = io_util.csv_to_array(
+                fp,
+                delimiter=delimiter,
+                quote_char=quote_char,
+                skip_header=skip_header,
+                skip_footer=skip_footer,
+        )
+
+        quadrants = io_util.slice_index_and_columns(
+                array,
+                index_depth,
+                columns_depth,
+        )
+
+        # Build columns.
+        own_columns = False
+        columns = None
+        if quadrants.columns.size:
+            own_columns = True
+            columns = array_to_index(
+                    quadrants.columns.T,
+                    index_constructor=cls._COLUMNS_CONSTRUCTOR,
+                    hierarchy_constructor=cls._COLUMNS_HIERARCHY_CONSTRUCTOR.from_labels,
+                    dtype=object,
+            )
+
+        # Build index.
+        own_index = False
+        index = IndexAutoFactory
+        if quadrants.index.size:
+            index = array_to_index(
+                    quadrants.index,
+                    index_constructor=Index,
+                    hierarchy_constructor=IndexHierarchy.from_labels,
+                    dtype=object,
+            )
+            own_index = True
+
+        result = cls(
+            data=quadrants.data,
+            own_data=True,
+            index=index,
+            own_index=own_index,
+            columns=columns,
+            own_columns=own_columns,
+            name=name,
+        )
+
+        if converters:
+            result = apply_converters_and_dtypes(result, converters, dtypes)
+        elif dtypes:
+            result = result.astype(dtypes)
+        return result
+
+    @classmethod
     @doc_inject(selector='constructor_frame')
+    @profile
     def from_delimited(cls,
             fp: PathSpecifierOrFileLikeOrIterator,
             *,
@@ -1617,7 +1706,8 @@ class Frame(ContainerOperand):
             dtypes: DtypesSpecifier = None,
             name: tp.Hashable = None,
             consolidate_blocks: bool = False,
-            store_filter: tp.Optional[StoreFilter] = STORE_FILTER_DEFAULT
+            store_filter: tp.Optional[StoreFilter] = STORE_FILTER_DEFAULT,
+            guess_dtypes: bool=False,
             ) -> 'Frame':
         '''
         Create a Frame from a file path or a file-like object defining a delimited (CSV, TSV) data file.
@@ -1644,9 +1734,27 @@ class Frame(ContainerOperand):
         # https://docs.scipy.org/doc/numpy/reference/generated/numpy.genfromtxt.html
 
         # TODO: add columns_select as usecols styles selective loading
-
         if skip_header < 0:
             raise ErrorInitFrame('skip_header must be greater than or equal to 0')
+
+        if not guess_dtypes:
+            return cls.from_delimited_no_guess(
+                fp=fp,
+                delimiter=delimiter,
+                index_depth=index_depth,
+                index_column_first=index_column_first,
+                index_name_depth_level=index_name_depth_level,
+                columns_depth=columns_depth,
+                columns_name_depth_level=columns_name_depth_level,
+                skip_header=skip_header,
+                skip_footer=skip_footer,
+                quote_char=quote_char,
+                encoding=encoding,
+                dtypes=dtypes,
+                name=name,
+                consolidate_blocks=consolidate_blocks,
+                store_filter=store_filter,
+            )
 
         fp = path_filter(fp)
         delimiter_native = '\t'
@@ -1812,7 +1920,8 @@ class Frame(ContainerOperand):
             dtypes: DtypesSpecifier = None,
             name: tp.Hashable = None,
             consolidate_blocks: bool = False,
-            store_filter: tp.Optional[StoreFilter] = STORE_FILTER_DEFAULT
+            store_filter: tp.Optional[StoreFilter] = STORE_FILTER_DEFAULT,
+            guess_dtypes: bool=False,
             ) -> 'Frame':
         '''
         Specialized version of :obj:`Frame.from_delimited` for CSV files.
@@ -1835,6 +1944,7 @@ class Frame(ContainerOperand):
                 name=name,
                 consolidate_blocks=consolidate_blocks,
                 store_filter=store_filter,
+                guess_dtypes=guess_dtypes,
                 )
 
     @classmethod
