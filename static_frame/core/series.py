@@ -5,6 +5,10 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.ma import MaskedArray #type: ignore
+from arraykit import immutable_filter
+from arraykit import mloc
+from arraykit import name_filter
+from arraykit import resolve_dtype
 
 from static_frame.core.assign import Assign
 from static_frame.core.container import ContainerOperand
@@ -65,7 +69,6 @@ from static_frame.core.util import EMPTY_TUPLE
 from static_frame.core.util import FLOAT_TYPES
 from static_frame.core.util import full_for_fill
 from static_frame.core.util import GetItemKeyType
-from static_frame.core.util import immutable_filter
 from static_frame.core.util import IndexConstructor
 from static_frame.core.util import IndexInitializer
 from static_frame.core.util import INT_TYPES
@@ -74,19 +77,17 @@ from static_frame.core.util import is_callable_or_mapping
 from static_frame.core.util import isin
 from static_frame.core.util import isna_array
 from static_frame.core.util import iterable_to_array_1d
-from static_frame.core.util import mloc
 from static_frame.core.util import NAME_DEFAULT
-from static_frame.core.util import name_filter
 from static_frame.core.util import NameType
 from static_frame.core.util import NULL_SLICE
 from static_frame.core.util import PathSpecifierOrFileLike
-from static_frame.core.util import resolve_dtype
 from static_frame.core.util import SeriesInitializer
 from static_frame.core.util import slices_from_targets
 from static_frame.core.util import UFunc
 from static_frame.core.util import ufunc_axis_skipna
 from static_frame.core.util import ufunc_unique
 from static_frame.core.util import write_optional_file
+from static_frame.core.util import DTYPE_NA_KINDS
 
 if tp.TYPE_CHECKING:
     from static_frame import Frame # pylint: disable=W0611 #pragma: no cover
@@ -954,11 +955,27 @@ class Series(ContainerOperand):
         '''
         Return a new :obj:`static_frame.Series` after removing values of NaN or None.
         '''
-        # get positions that we want to keep
-        sel = np.logical_not(isna_array(self.values))
-        if not np.any(sel):
-            return self.__class__(())
+        if self.values.dtype.kind not in DTYPE_NA_KINDS:
+            # return the same array in a new series
+            return self.__class__(self.values,
+                    index=self._index,
+                    name=self._name,
+                    own_index=True)
 
+        # get positions that we want to keep
+        isna = isna_array(self.values)
+        length = len(self.values)
+        count = isna.sum()
+
+        if count == length: # all are NaN
+            return self.__class__((), name=self.name)
+        if count == 0: # None are nan
+            return self.__class__(self.values,
+                    index=self._index,
+                    name=self._name,
+                    own_index=True)
+
+        sel = np.logical_not(isna)
         values = self.values[sel]
         values.flags.writeable = False
 
@@ -1324,7 +1341,7 @@ class Series(ContainerOperand):
     def mloc(self) -> int:
         '''{doc_int}
         '''
-        return mloc(self.values)
+        return mloc(self.values) #type: ignore
 
     @property
     def dtype(self) -> np.dtype:

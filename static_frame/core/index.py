@@ -52,7 +52,7 @@ from static_frame.core.util import EMPTY_ARRAY
 from static_frame.core.util import EMPTY_SLICE
 from static_frame.core.util import EMPTY_TUPLE
 from static_frame.core.util import GetItemKeyType
-from static_frame.core.util import immutable_filter
+from arraykit import immutable_filter
 from static_frame.core.util import IndexInitializer
 from static_frame.core.util import INT_TYPES
 from static_frame.core.util import intersect1d
@@ -62,12 +62,12 @@ from static_frame.core.util import iterable_to_array_1d
 from static_frame.core.util import KEY_ITERABLE_TYPES
 from static_frame.core.util import KeyIterableTypes
 from static_frame.core.util import KeyTransformType
-from static_frame.core.util import mloc
+from arraykit import mloc
 from static_frame.core.util import NAME_DEFAULT
-from static_frame.core.util import name_filter
+from arraykit import name_filter
 from static_frame.core.util import NameType
 from static_frame.core.util import NULL_SLICE
-from static_frame.core.util import resolve_dtype
+from arraykit import resolve_dtype
 from static_frame.core.util import setdiff1d
 from static_frame.core.util import SLICE_ATTRS
 from static_frame.core.util import SLICE_START_ATTR
@@ -569,7 +569,7 @@ class Index(IndexBase):
         '''
         if self._recache:
             self._update_array_cache()
-        return mloc(self._labels)
+        return mloc(self._labels) #type: ignore
 
     @property
     def dtype(self) -> np.dtype:
@@ -630,14 +630,6 @@ class Index(IndexBase):
         if self._recache:
             self._update_array_cache()
         return tp.cast(int, self._labels.nbytes)
-
-    # def __bool__(self) -> bool:
-    #     '''
-    #     True if this container has size.
-    #     '''
-    #     if self._recache:
-    #         self._update_array_cache()
-    #     return bool(self._labels.size)
 
     #---------------------------------------------------------------------------
     # set operations
@@ -1017,16 +1009,18 @@ class Index(IndexBase):
 
         if key is None:
             labels = self._labels
-        elif isinstance(key, slice):
+        elif key.__class__ is slice:
             if key == NULL_SLICE:
                 labels = self._labels
             else:
                 # if labels is an np array, this will be a view; if a list, a copy
                 labels = self._labels[key]
+                labels.flags.writeable = False
         elif isinstance(key, KEY_ITERABLE_TYPES):
             # we assume Booleans have been normalized to integers here
             # can select directly from _labels[key] if if key is a list
             labels = self._labels[key]
+            labels.flags.writeable = False
         else: # select a single label value
             return self._labels[key] #type: ignore
 
@@ -1135,7 +1129,7 @@ class Index(IndexBase):
         '''
         if self._recache:
             self._update_array_cache()
-        return tp.cast(tp.Iterator[tp.Hashable], self._labels.__iter__())
+        yield from self._labels.__iter__()
 
     def __reversed__(self) -> tp.Iterator[tp.Hashable]:
         '''
